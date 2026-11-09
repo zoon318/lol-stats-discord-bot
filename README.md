@@ -55,7 +55,6 @@ pip install -r requirements.txt
 ```
 DISCORD_TOKEN=디스코드_봇_토큰
 RIOT_API_KEY=RGAPI-...
-GUILD_ID=서버ID1,서버ID2 (선택, 쉼표로 여러 서버)
 ```
 
 ```powershell
@@ -63,6 +62,7 @@ py bot.py
 ```
 
 ### 디스코드 봇 권한
+봇을 서버에 초대하기만 하면 슬래시 명령어가 그 서버에 자동으로 등록됩니다 (서버 ID 설정 불필요).
 OAuth2 URL Generator에서 scope `bot`, `applications.commands`,
 권한 `Send Messages`, `Embed Links`, `Attach Files`를 선택해 서버에 초대합니다.
 

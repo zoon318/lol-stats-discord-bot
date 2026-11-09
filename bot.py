@@ -8,7 +8,7 @@
   같은 폴더에 .env 파일:
     DISCORD_TOKEN=디스코드_봇_토큰
     RIOT_API_KEY=RGAPI-xxxxxxxx
-    GUILD_ID=서버ID1,서버ID2   (선택: 쉼표로 여러 개. 적은 서버에 슬래시 명령어가 즉시 등록됨)
+  봇이 들어가 있는 모든 서버에 슬래시 명령어가 자동 등록됩니다 (서버 ID 설정 불필요)
 """
 
 import asyncio
@@ -32,8 +32,6 @@ except ImportError:
 
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 RIOT_API_KEY = os.environ["RIOT_API_KEY"]
-# 쉼표로 구분한 서버 ID 여러 개 지원 (예: GUILD_ID=111,222,333)
-GUILD_IDS = [int(g) for g in os.environ.get("GUILD_ID", "").replace(" ", "").split(",") if g.isdigit()]
 
 PLATFORM = "kr"     # 한국 서버 (랭크, 소환사 정보)
 REGION = "asia"     # 계정/매치 정보는 대륙 단위 라우팅
@@ -236,22 +234,19 @@ class LolBot(discord.Client):
     async def setup_hook(self):
         await self.riot.start()
         await self.load_champion_names()
-        if GUILD_IDS:
-            # 적어 둔 서버마다 명령어를 바로 등록
-            for gid in GUILD_IDS:
-                guild = discord.Object(id=gid)
-                self.tree.copy_global_to(guild=guild)
-                try:
-                    synced = await self.tree.sync(guild=guild)
-                    print(f"서버 {gid}: 명령어 {len(synced)}개 등록")
-                except discord.Forbidden:
-                    print(f"서버 {gid}: 등록 실패 — 봇이 이 서버에 없거나 applications.commands 없이 초대됨")
-                except discord.HTTPException as e:
-                    print(f"서버 {gid}: 등록 실패 — {e}")
-        else:
-            # 서버 ID를 안 적으면 봇이 들어간 모든 서버에 등록 (반영까지 시간이 걸릴 수 있음)
-            synced = await self.tree.sync()
-            print(f"전체 서버용 명령어 {len(synced)}개 등록")
+        self._synced_once = False
+
+    async def sync_guild(self, guild: discord.abc.Snowflake, name: str = ""):
+        """한 서버에 슬래시 명령어 등록 (서버 전용 등록이라 즉시 반영됨)"""
+        label = f"{name} ({guild.id})" if name else str(guild.id)
+        self.tree.copy_global_to(guild=guild)
+        try:
+            synced = await self.tree.sync(guild=guild)
+            print(f"[{label}] 명령어 {len(synced)}개 등록")
+        except discord.Forbidden:
+            print(f"[{label}] 등록 실패 — applications.commands 권한 없이 초대됨. 초대 링크로 다시 초대하세요.")
+        except discord.HTTPException as e:
+            print(f"[{label}] 등록 실패 — {e}")
 
     async def load_champion_names(self):
         """Data Dragon에서 챔피언 한글 이름 불러오기"""
@@ -271,7 +266,18 @@ class LolBot(discord.Client):
         await super().close()
 
     async def on_ready(self):
-        print(f"{self.user} 로그인 완료!")
+        print(f"{self.user} 로그인 완료! (서버 {len(self.guilds)}개)")
+        if self._synced_once:  # 재접속 때는 다시 등록하지 않음
+            return
+        self._synced_once = True
+        # 봇이 들어가 있는 모든 서버에 자동 등록 → .env 수정 필요 없음
+        for guild in self.guilds:
+            await self.sync_guild(guild, guild.name)
+
+    async def on_guild_join(self, guild: discord.Guild):
+        # 새 서버에 초대되면 그 자리에서 바로 등록
+        print(f"새 서버에 초대됨: {guild.name}")
+        await self.sync_guild(guild, guild.name)
 
 
 bot = LolBot()

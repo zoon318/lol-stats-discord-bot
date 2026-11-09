@@ -61,6 +61,8 @@ RIOT_API_KEY=RGAPI-...
 py bot.py
 ```
 
+또는 `start.bat`을 더블클릭하면 가상환경 생성, 라이브러리 설치, 실행까지 자동으로 합니다.
+
 ### 디스코드 봇 권한
 봇을 서버에 초대하기만 하면 슬래시 명령어가 그 서버에 자동으로 등록됩니다 (서버 ID 설정 불필요).
 OAuth2 URL Generator에서 scope `bot`, `applications.commands`,
@@ -72,6 +74,7 @@ OAuth2 URL Generator에서 scope `bot`, `applications.commands`,
 bot.py            디스코드 봇, Riot API 호출, 전적 분석
 charts.py         matplotlib 그래프 생성
 history.py        검색 기록·내 계정 저장 (data/history.json)
+start.bat         윈도우용 실행 파일 (더블클릭)
 requirements.txt  필요한 라이브러리
 .env.example      환경 변수 예시 (.env는 커밋하지 않음)
 docs/             README용 이미지

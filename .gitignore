@@ -1,0 +1,14 @@
+# 비밀 정보 (토큰, API 키) — 절대 올리지 않기
+.env
+
+# 파이썬 가상환경 / 캐시
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# 에디터 / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

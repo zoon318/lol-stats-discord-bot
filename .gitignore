@@ -12,3 +12,6 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# 검색 기록 / 등록한 계정 (개인 데이터)
+data/

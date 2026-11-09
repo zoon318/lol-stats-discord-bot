@@ -22,6 +22,7 @@ import discord
 from discord import app_commands
 
 from charts import make_stats_chart
+from history import History
 
 try:
     from dotenv import load_dotenv
@@ -229,6 +230,7 @@ class LolBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.riot = RiotAPI(RIOT_API_KEY)
         self.champ_ko: dict[int, str] = {}
+        self.history = History()
 
     async def setup_hook(self):
         await self.riot.start()
@@ -264,18 +266,34 @@ class LolBot(discord.Client):
 bot = LolBot()
 
 
-async def lookup(interaction: discord.Interaction, riot_id: str, queue_key: str, count: int):
-    """닉네임 → 계정, 랭크, 최근 게임 분석까지. 실패하면 메시지를 보내고 None 반환"""
+def split_riot_id(riot_id: str) -> tuple[str, str]:
     name, _, tag = riot_id.strip().partition("#")
-    tag = tag.strip() or "KR1"
-    name = name.strip()
+    return name.strip(), (tag.strip() or "KR1")
+
+
+async def find_account(riot_id: str):
+    name, tag = split_riot_id(riot_id)
+    return await bot.riot.account_by_riot_id(name, tag)
+
+
+async def lookup(interaction: discord.Interaction, riot_id: str | None, queue_key: str, count: int):
+    """닉네임 → 계정, 랭크, 최근 게임 분석까지. 실패하면 메시지를 보내고 None 반환"""
+    if not riot_id or not riot_id.strip():
+        riot_id = bot.history.get_user(interaction.user.id)
+        if not riot_id:
+            await interaction.followup.send(
+                "닉네임을 입력하거나, `/등록 닉네임#태그`로 내 롤 계정을 등록해 두면 닉네임 없이 바로 조회할 수 있어요.")
+            return None
 
     try:
-        account = await bot.riot.account_by_riot_id(name, tag)
+        account = await find_account(riot_id)
         if not account:
+            name, tag = split_riot_id(riot_id)
             await interaction.followup.send(f"❌ `{name}#{tag}` 플레이어를 찾을 수 없어요. 닉네임과 태그를 확인해 주세요.")
             return None
         puuid = account["puuid"]
+        # 조회 성공한 닉네임은 정확한 표기로 기록 → 다음부터 자동완성에 뜸
+        bot.history.add(interaction.guild_id, f"{account['gameName']}#{account['tagLine']}")
 
         entries, ids = await asyncio.gather(
             bot.riot.league_entries(puuid),
@@ -295,18 +313,76 @@ QUEUE_CHOICES = [
     app_commands.Choice(name="전체 게임", value="all"),
 ]
 
+RIOT_ID_HELP = "닉네임#태그 — 몇 글자만 치면 전에 검색한 닉네임이 떠요. 비우면 /등록한 내 계정"
+
+
+async def nickname_autocomplete(interaction: discord.Interaction, current: str):
+    """닉네임 칸에 입력할 때 '내 계정' + 이 서버에서 검색했던 닉네임을 추천"""
+    choices = []
+    mine = bot.history.get_user(interaction.user.id)
+    if mine and current.lower() in mine.lower():
+        choices.append(app_commands.Choice(name=f"⭐ 내 계정: {mine}"[:100], value=mine))
+
+    for e in bot.history.search(interaction.guild_id, current):
+        if e["name"] == mine:
+            continue
+        label = f"{e['name']}  ·  {e['count']}회 검색"
+        choices.append(app_commands.Choice(name=label[:100], value=e["name"]))
+    return choices[:25]
+
+
+@bot.tree.command(name="등록", description="내 롤 계정을 등록해요. 이후 /전적, /그래프에서 닉네임을 비우면 내 계정이 조회돼요")
+@app_commands.rename(riot_id="닉네임")
+@app_commands.describe(riot_id="내 닉네임#태그 (예: Hide on bush#KR1)")
+@app_commands.autocomplete(riot_id=nickname_autocomplete)
+async def register(interaction: discord.Interaction, riot_id: str):
+    await interaction.response.defer(ephemeral=True)  # 나에게만 보이는 답장
+    try:
+        account = await find_account(riot_id)
+    except RiotError as e:
+        await interaction.followup.send(f"⚠️ {e}")
+        return
+    if not account:
+        name, tag = split_riot_id(riot_id)
+        await interaction.followup.send(f"❌ `{name}#{tag}` 플레이어를 찾을 수 없어요.")
+        return
+    display = f"{account['gameName']}#{account['tagLine']}"
+    bot.history.set_user(interaction.user.id, display)
+    bot.history.add(interaction.guild_id, display)
+    await interaction.followup.send(f"✅ 내 계정을 `{display}`(으)로 등록했어요. 이제 `/전적`만 입력해도 바로 조회돼요.")
+
+
+@bot.tree.command(name="등록해제", description="등록한 내 롤 계정을 지워요")
+async def unregister(interaction: discord.Interaction):
+    if bot.history.remove_user(interaction.user.id):
+        await interaction.response.send_message("🗑️ 등록한 내 계정을 지웠어요.", ephemeral=True)
+    else:
+        await interaction.response.send_message("등록된 계정이 없어요.", ephemeral=True)
+
+
+@bot.tree.command(name="기록삭제", description="이 서버의 검색 기록에서 닉네임을 지워요")
+@app_commands.rename(riot_id="닉네임")
+@app_commands.describe(riot_id="지울 닉네임#태그")
+@app_commands.autocomplete(riot_id=nickname_autocomplete)
+async def delete_history(interaction: discord.Interaction, riot_id: str):
+    if bot.history.remove(interaction.guild_id, riot_id.strip()):
+        await interaction.response.send_message(f"🗑️ `{riot_id}`을(를) 검색 기록에서 지웠어요.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"`{riot_id}`은(는) 검색 기록에 없어요.", ephemeral=True)
+
 
 @bot.tree.command(name="그래프", description="최근 게임 지표를 그래프로 보여줘요")
 @app_commands.rename(riot_id="닉네임", queue="큐", count="게임수")
 @app_commands.describe(
-    riot_id="닉네임#태그 (예: Hide on bush#KR1) — 태그 생략 시 KR1",
+    riot_id=RIOT_ID_HELP,
     queue="분석할 게임 종류 (기본: 솔로랭크)",
     count="분석할 최근 게임 수 (3~20, 기본 20)",
 )
 @app_commands.choices(queue=QUEUE_CHOICES)
+@app_commands.autocomplete(riot_id=nickname_autocomplete)
 async def graph(
     interaction: discord.Interaction,
-    riot_id: str,
+    riot_id: str | None = None,
     queue: app_commands.Choice[str] | None = None,
     count: app_commands.Range[int, 3, 20] = 20,
 ):
@@ -335,14 +411,15 @@ async def graph(
 @bot.tree.command(name="전적", description="롤 플레이어의 랭크, 최근 승률, 플레이 스타일을 보여줘요")
 @app_commands.rename(riot_id="닉네임", queue="큐", count="게임수")
 @app_commands.describe(
-    riot_id="닉네임#태그 (예: Hide on bush#KR1) — 태그 생략 시 KR1",
+    riot_id=RIOT_ID_HELP,
     queue="분석할 게임 종류 (기본: 솔로랭크)",
     count="분석할 최근 게임 수 (1~20, 기본 15)",
 )
 @app_commands.choices(queue=QUEUE_CHOICES)
+@app_commands.autocomplete(riot_id=nickname_autocomplete)
 async def stats(
     interaction: discord.Interaction,
-    riot_id: str,
+    riot_id: str | None = None,
     queue: app_commands.Choice[str] | None = None,
     count: app_commands.Range[int, 1, 20] = 15,
 ):

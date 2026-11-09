@@ -55,7 +55,7 @@ pip install -r requirements.txt
 ```
 DISCORD_TOKEN=디스코드_봇_토큰
 RIOT_API_KEY=RGAPI-...
-GUILD_ID=서버_ID (선택)
+GUILD_ID=서버ID1,서버ID2 (선택, 쉼표로 여러 서버)
 ```
 
 ```powershell

@@ -8,7 +8,7 @@
   같은 폴더에 .env 파일:
     DISCORD_TOKEN=디스코드_봇_토큰
     RIOT_API_KEY=RGAPI-xxxxxxxx
-    GUILD_ID=내_서버_ID   (선택: 넣으면 슬래시 명령어가 그 서버에 즉시 등록됨)
+    GUILD_ID=서버ID1,서버ID2   (선택: 쉼표로 여러 개. 적은 서버에 슬래시 명령어가 즉시 등록됨)
 """
 
 import asyncio
@@ -32,7 +32,8 @@ except ImportError:
 
 DISCORD_TOKEN = os.environ["DISCORD_TOKEN"]
 RIOT_API_KEY = os.environ["RIOT_API_KEY"]
-GUILD_ID = os.environ.get("GUILD_ID")
+# 쉼표로 구분한 서버 ID 여러 개 지원 (예: GUILD_ID=111,222,333)
+GUILD_IDS = [int(g) for g in os.environ.get("GUILD_ID", "").replace(" ", "").split(",") if g.isdigit()]
 
 PLATFORM = "kr"     # 한국 서버 (랭크, 소환사 정보)
 REGION = "asia"     # 계정/매치 정보는 대륙 단위 라우팅
@@ -235,12 +236,22 @@ class LolBot(discord.Client):
     async def setup_hook(self):
         await self.riot.start()
         await self.load_champion_names()
-        if GUILD_ID:
-            guild = discord.Object(id=int(GUILD_ID))
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
+        if GUILD_IDS:
+            # 적어 둔 서버마다 명령어를 바로 등록
+            for gid in GUILD_IDS:
+                guild = discord.Object(id=gid)
+                self.tree.copy_global_to(guild=guild)
+                try:
+                    synced = await self.tree.sync(guild=guild)
+                    print(f"서버 {gid}: 명령어 {len(synced)}개 등록")
+                except discord.Forbidden:
+                    print(f"서버 {gid}: 등록 실패 — 봇이 이 서버에 없거나 applications.commands 없이 초대됨")
+                except discord.HTTPException as e:
+                    print(f"서버 {gid}: 등록 실패 — {e}")
         else:
-            await self.tree.sync()
+            # 서버 ID를 안 적으면 봇이 들어간 모든 서버에 등록 (반영까지 시간이 걸릴 수 있음)
+            synced = await self.tree.sync()
+            print(f"전체 서버용 명령어 {len(synced)}개 등록")
 
     async def load_champion_names(self):
         """Data Dragon에서 챔피언 한글 이름 불러오기"""
